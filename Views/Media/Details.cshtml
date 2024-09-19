@@ -1,0 +1,55 @@
+﻿@model SteganographyWebApp.ViewModels.MediaViewModel
+
+@{
+    ViewData["Title"] = "Details";
+}
+
+<h1>Details</h1>
+
+<div>
+    <h4>Media</h4>
+    <hr />
+    <dl class="row">
+        <dt class = "col-sm-2">
+            @Html.DisplayNameFor(model => model.Name)
+        </dt>
+        <dd class = "col-sm-10">
+            @Html.DisplayFor(model => model.Name)
+        </dd>
+        <dt class = "col-sm-2">
+            @Html.DisplayNameFor(model => model.FileType)
+        </dt>
+        <dd class = "col-sm-10">
+            @Html.DisplayFor(model => model.FileType)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.DisplayFileSize)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.DisplayFileSize)
+        </dd>
+        <dd class="col-sm-12 text-center py-2">
+            
+            @if (Model.FileType == MediaType.Image && Model.FileContents != null)
+            {
+                var base64 = Convert.ToBase64String(Model.FileContents);
+                var imageStream = String.Format("data:image/png;base64,{0}", base64);
+
+                <img src="@imageStream" class="img-fluid w-50">
+            } 
+            else if (Model.FileType == MediaType.Video && Model.FileContents != null)
+            {
+                var base64 = Convert.ToBase64String(Model.FileContents);
+                var videoStream = String.Format("data:video/mp4;base64,{0}", base64);
+                <video controls controlslist="nodownload" src="@videoStream" class="w-100">
+                    Your browser does not support the video tag.
+                </video>
+            }
+          
+        </dd>
+    </dl>
+</div>
+<div>
+    <a asp-action="Edit" asp-route-id="@Model?.Id">Edit</a> |
+    <a asp-action="Index">Back to List</a>
+</div>
