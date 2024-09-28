@@ -36,18 +36,15 @@
                 var imageStream = String.Format("data:image/png;base64,{0}", base64);
 
                 <img src="@imageStream" class="img-fluid w-50">
-            } 
-            else if (Model.FileType == MediaType.Video && Model.FileContents != null)
-            {
-                var base64 = Convert.ToBase64String(Model.FileContents);
-                var videoStream = String.Format("data:video/mp4;base64,{0}", base64);
-                <video controls controlslist="nodownload" src="@videoStream" class="w-100">
-                    Your browser does not support the video tag.
-                </video>
             }
-          
+
+            <br/>
+            <a asp-action="DownloadFile" asp-route-id="@Model?.Id" class="btn btn-primary mt-2">Download</a>
         </dd>
     </dl>
+
+    
+
 </div>
 <div>
     <a asp-action="Edit" asp-route-id="@Model?.Id">Edit</a> |

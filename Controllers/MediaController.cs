@@ -1,14 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Diagnostics;
 using System.Security.Claims;
-using System.Threading.Tasks;
+using ByteSizeLib;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
 using SteganographyWebApp.Data;
 using SteganographyWebApp.Models;
+using SteganographyWebApp.Utilities;
 using SteganographyWebApp.ViewModels;
 
 namespace SteganographyWebApp.Controllers
@@ -35,27 +33,29 @@ namespace SteganographyWebApp.Controllers
 
 
             return View(await _context.Media
+                .AsNoTracking()
                 .Where(m => m.UserId == userId)
                 .Select(m => new MediaViewModel
-                    {
-                        Id = m.Id,
-                        Name = m.Name,
-                        FileType = m.FileType,
-                        FileSize = m.FileSize,
-                        DisplayFileSize = Conversions.GetBytesReadable(m.FileSize)
+                {
+                    Id = m.Id,
+                    Name = m.Name,
+                    FileType = m.FileType,
+                    FileSize = m.FileSize,
+                    DisplayFileSize = ByteSize.FromBytes(m.FileSize).ToString()
                 })
                 .ToListAsync());
         }
 
         // GET: Media/Details/5
-        public async Task<IActionResult> Details(Guid? id)
+        public IActionResult Details(Guid? id)
         {
             if (id == null)
             {
                 return NotFound();
             }
 
-            var media = await _context.Media
+            var media =  _context.Media
+                .AsNoTracking()
                 .Select(m => new MediaViewModel()
                 {
                     Id = m.Id,
@@ -63,16 +63,45 @@ namespace SteganographyWebApp.Controllers
                     FileType = m.FileType,
                     FileContents = m.File,
                     FileSize = m.FileSize,
-                    DisplayFileSize = Conversions.GetBytesReadable(m.FileSize)
+                    DisplayFileSize = ByteSize.FromBytes(m.FileSize).ToString()
                 })
-                .FirstOrDefaultAsync(m => m.Id == id);
+                .FirstOrDefault(m => m.Id == id);
+
+            if (media == null || media.FileContents == null)
+            {
+                return NotFound();
+            }
+
+            return View(media);
+        }
+
+        // GET: Media/DownloadFile/5
+        public IActionResult DownloadFile(Guid? id)
+        {
+            if (id == null)
+            {
+                return NotFound();
+            }
+
+            var media = _context.Media
+                .AsNoTracking()
+                .Select(m => new
+                {
+                    Id = m.Id,
+                    Name = m.Name,
+                    FileType = m.FileType,
+                    FileContents = m.File
+                })
+                .FirstOrDefault(m => m.Id == id);
 
             if (media == null)
             {
                 return NotFound();
             }
 
-            return View(media);
+            String contentType = media.FileType == MediaType.Image ? "image/png" : "video/x-matroska";
+
+            return File(media.FileContents, contentType, media.Name);
         }
 
         // GET: Media/Create
@@ -88,14 +117,14 @@ namespace SteganographyWebApp.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create([Bind("File")] MediaViewModel media)
         {
-            if (ModelState.IsValid && media.File != null && (media.File.ContentType == "image/png" || media.File.ContentType == "video/x-matroska"))
+            if (ModelState.IsValid)
             {
                 if (media.File == null || (media.File.ContentType != "image/png" && media.File.ContentType != "video/x-matroska"))
                 {
-                    ModelState.AddModelError("File", "The file is not a valid media format.");
+                    ModelState.AddModelError("File", "The file is not a currently supported media format (.png or .mkv). ");
                     return View(media);
                 }
-                
+
                 Guid userId;
                 bool result = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
                 if (!result)
@@ -107,19 +136,36 @@ namespace SteganographyWebApp.Controllers
                 {
                     await media.File.CopyToAsync(memoryStream);
 
-                    Media mediaModel = new Media
-                    {
-                        Id = Guid.NewGuid(),
-                        UserId = userId,
-                        Name = media.File.FileName,
-                        FileType = media.File.ContentType == "image/png" ? MediaType.Image : MediaType.Video,
-                        File = memoryStream.ToArray(),
-                        FileSize = memoryStream.Length
-                    };
+                    long memoryStreamLength = memoryStream.Length;
 
-                    _context.Add(mediaModel);
-                    await _context.SaveChangesAsync();
-                    return RedirectToAction(nameof(Index));
+                    if (memoryStreamLength > 200_000_000)
+                    {
+                        ModelState.AddModelError("File", "The file is too large (200 MB Maximum allowed).");
+                        return View(media);
+                    }
+
+                    using (BinaryReader reader = new BinaryReader(memoryStream))
+                    {
+                        if (!FileValidator.IsValidMediaFile(media.File.FileName, reader))
+                        {
+                            ModelState.AddModelError("File", "The file is not a currently supported media format (.png or .mkv). ");
+                            return View(media);
+                        }
+
+                        Media mediaModel = new Media
+                        {
+                            Id = Guid.NewGuid(),
+                            UserId = userId,
+                            Name = media.File.FileName,
+                            FileType = media.File.ContentType == "image/png" ? MediaType.Image : MediaType.Video,
+                            File = memoryStream.ToArray(),
+                            FileSize = memoryStreamLength
+                        };
+
+                        _context.Add(mediaModel);
+                        await _context.SaveChangesAsync();
+                        return RedirectToAction(nameof(Index));
+                    }
                 }
             }
 
@@ -134,7 +180,10 @@ namespace SteganographyWebApp.Controllers
                 return NotFound();
             }
 
-            var media = await _context.Media.Select(m => new MediaViewModel { Id = m.Id, Name = m.Name }).FirstOrDefaultAsync(m => m.Id == id);
+            var media = await _context.Media
+                .AsNoTracking()
+                .Select(m => new MediaViewModel { Id = m.Id, Name = m.Name })
+                .FirstOrDefaultAsync(m => m.Id == id);
             if (media == null)
             {
                 return NotFound();
@@ -185,14 +234,15 @@ namespace SteganographyWebApp.Controllers
         }
 
         // GET: Media/Delete/5
-        public async Task<IActionResult> Delete(Guid? id)
+        public IActionResult Delete(Guid? id)
         {
             if (id == null)
             {
                 return NotFound();
             }
 
-            var media = await _context.Media
+            var media = _context.Media
+                .AsNoTracking()
                 .Select(m => new MediaViewModel()
                 {
                     Id = m.Id,
@@ -200,9 +250,9 @@ namespace SteganographyWebApp.Controllers
                     FileType = m.FileType,
                     FileContents = m.File,
                     FileSize = m.FileSize,
-                    DisplayFileSize = Conversions.GetBytesReadable(m.FileSize)
+                    DisplayFileSize = ByteSize.FromBytes(m.FileSize).ToString()
                 })
-                .FirstOrDefaultAsync(m => m.Id == id);
+                .FirstOrDefault(m => m.Id == id);
 
             if (media == null)
             {
@@ -217,10 +267,13 @@ namespace SteganographyWebApp.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteConfirmed(Guid id)
         {
-            var media = await _context.Media.FindAsync(id);
+            var media = await _context.Media
+                .Select(m => new { m.Id })
+                .FirstOrDefaultAsync(m => m.Id == id);
+
             if (media != null)
             {
-                _context.Media.Remove(media);
+                await _context.Media.Where(m => m.Id == id).ExecuteDeleteAsync();
             }
 
             await _context.SaveChangesAsync();
