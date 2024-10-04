@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Drawing;
 using System.Security.Claims;
 using ByteSizeLib;
 using Microsoft.AspNetCore.Authorization;
@@ -8,6 +9,7 @@ using SteganographyWebApp.Data;
 using SteganographyWebApp.Models;
 using SteganographyWebApp.Utilities;
 using SteganographyWebApp.ViewModels;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace SteganographyWebApp.Controllers
 {
@@ -47,7 +49,7 @@ namespace SteganographyWebApp.Controllers
         }
 
         // GET: Media/Details/5
-        public IActionResult Details(Guid? id)
+        public async Task<IActionResult> Details(Guid? id)
         {
             if (id == null)
             {
@@ -72,7 +74,34 @@ namespace SteganographyWebApp.Controllers
                 return NotFound();
             }
 
-            return View(media);
+            if (media.FileType == MediaType.Image)
+            {
+                using (var memoryStream = new MemoryStream(media.FileContents))
+                using (var resizedStream = new MemoryStream())
+                {
+
+#pragma warning disable CA1416 // Validate platform compatibility
+                    Bitmap bitmap = new Bitmap(memoryStream);
+                    float width = 1920;
+                    float height = 1080;
+                    float scale = Math.Min(width / bitmap.Width, height / bitmap.Height);
+                    var scaleWidth = (int)(bitmap.Width * scale);
+                    var scaleHeight = (int)(bitmap.Height * scale);
+                    Bitmap resized = new Bitmap(bitmap, scaleWidth, scaleHeight);
+
+                    resized.Save(resizedStream, System.Drawing.Imaging.ImageFormat.Png);
+#pragma warning restore CA1416 // Validate platform compatibility
+
+                    media.FileContents = resizedStream.ToArray();
+
+                    return View(media);
+                }
+            }
+            else
+            {
+                return View(media);
+            }
+         
         }
 
         // GET: Media/DownloadFile/5
@@ -259,7 +288,33 @@ namespace SteganographyWebApp.Controllers
                 return NotFound();
             }
 
-            return View(media);
+            if (media.FileType == MediaType.Image)
+            {
+                using (var memoryStream = new MemoryStream(media.FileContents))
+                using (var resizedStream = new MemoryStream())
+                {
+
+#pragma warning disable CA1416 // Validate platform compatibility
+                    Bitmap bitmap = new Bitmap(memoryStream);
+                    float width = 1920;
+                    float height = 1080;
+                    float scale = Math.Min(width / bitmap.Width, height / bitmap.Height);
+                    var scaleWidth = (int)(bitmap.Width * scale);
+                    var scaleHeight = (int)(bitmap.Height * scale);
+                    Bitmap resized = new Bitmap(bitmap, scaleWidth, scaleHeight);
+
+                    resized.Save(resizedStream, System.Drawing.Imaging.ImageFormat.Png);
+#pragma warning restore CA1416 // Validate platform compatibility
+
+                    media.FileContents = resizedStream.ToArray();
+
+                    return View(media);
+                }
+            }
+            else
+            {
+                return View(media);
+            }
         }
 
         // POST: Media/Delete/5

@@ -4,7 +4,7 @@ using Microsoft.IdentityModel.Tokens;
 using SteganographyWebApp.Data;
 using Microsoft.Identity.Web;
 using System.Text;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using SteganographyWebApp.Services;
 
@@ -49,6 +49,9 @@ builder.Services.AddAuthorization();
 builder.Services.AddTransient<IEmailSender, EmailSender>();
 builder.Services.Configure<AuthMessageSenderOptions>(builder.Configuration);
 
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
 var app = builder.Build();
 
 app.MapIdentityApi<IdentityUser>();
@@ -57,11 +60,12 @@ app.MapIdentityApi<IdentityUser>();
 if (app.Environment.IsDevelopment())
 {
     app.UseMigrationsEndPoint();
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 else
 {
     app.UseExceptionHandler("/Home/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
