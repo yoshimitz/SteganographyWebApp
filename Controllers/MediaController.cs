@@ -21,6 +21,7 @@ namespace SteganographyWebApp.Controllers
         public MediaController(ApplicationDbContext context)
         {
             _context = context;
+            context.Database.SetCommandTimeout(600);
         }
 
         // GET: Media

@@ -21,6 +21,7 @@ namespace SteganographyWebApp.Controllers.Api
         public MediaApiController(ApplicationDbContext context)
         {
             _context = context;
+            context.Database.SetCommandTimeout(600);
         }
 
         // GET: api/Media
