@@ -133,7 +133,7 @@ namespace SteganographyWebApp.Controllers.Api
 
 
                     _context.Media.Add(media);
-                    await _context.SaveChangesAsync();
+                    _context.SaveChanges();
 
                     return CreatedAtAction("GetMedia", new { id = media.Id }, media);
                 }

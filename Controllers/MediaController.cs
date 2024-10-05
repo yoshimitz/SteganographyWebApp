@@ -1,7 +1,4 @@
-﻿using System.Diagnostics;
-using System.Drawing;
-using System.Security.Claims;
-using ByteSizeLib;
+﻿using ByteSizeLib;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +6,8 @@ using SteganographyWebApp.Data;
 using SteganographyWebApp.Models;
 using SteganographyWebApp.Utilities;
 using SteganographyWebApp.ViewModels;
-using static System.Net.Mime.MediaTypeNames;
+using System.Drawing;
+using System.Security.Claims;
 
 namespace SteganographyWebApp.Controllers
 {
@@ -57,52 +55,90 @@ namespace SteganographyWebApp.Controllers
                 return NotFound();
             }
 
-            var media =  _context.Media
-                .AsNoTracking()
-                .Select(m => new MediaViewModel()
-                {
-                    Id = m.Id,
-                    Name = m.Name,
-                    FileType = m.FileType,
-                    FileContents = m.File,
-                    FileSize = m.FileSize,
-                    DisplayFileSize = ByteSize.FromBytes(m.FileSize).ToString()
-                })
-                .FirstOrDefault(m => m.Id == id);
+            Guid userId;
+            bool result = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
+            if (!result)
+            {
+                return View("Error");
+            }
 
-            if (media == null || media.FileContents == null)
+            var mediaNoFile = await _context.Media
+                .AsNoTracking()
+                .Select(m => new
+                {
+                    m.Id,
+                    m.Name,
+                    m.UserId,
+                    m.FileType,
+                    m.FileSize,
+                })
+                .FirstOrDefaultAsync(m => m.Id == id);
+
+            if (mediaNoFile == null)
             {
                 return NotFound();
             }
 
-            if (media.FileType == MediaType.Image)
+            if (userId != mediaNoFile.UserId)
             {
-                using (var memoryStream = new MemoryStream(media.FileContents))
-                using (var resizedStream = new MemoryStream())
-                {
+                return Unauthorized();
+            }
 
+            MediaViewModel mediaViewModel = new MediaViewModel
+            {
+                Id = mediaNoFile.Id,
+                Name = mediaNoFile.Name,
+                UserId = mediaNoFile.UserId,
+                FileType = mediaNoFile.FileType,
+                DisplayFileSize = ByteSize.FromBytes(mediaNoFile.FileSize).ToString()
+            };
+
+            if (mediaViewModel.FileType == MediaType.Image)
+            {
+                var mediaFile = _context.Media
+                    .AsNoTracking()
+                    .Select(m => new MediaViewModel()
+                    {
+                        Id = m.Id,
+                        FileContents = m.File
+                    })
+                    .FirstOrDefault(m => m.Id == id);
+
+                if (mediaFile == null || mediaFile.FileContents == null)
+                {
+                    return NotFound();
+                }
+
+                mediaViewModel.FileContents = mediaFile.FileContents;
+
+                if (mediaNoFile.FileSize >= 2_000_000)
+                {
+                    using var memoryStream = new MemoryStream(mediaFile.FileContents);
+                    using var resizedStream = new MemoryStream();
 #pragma warning disable CA1416 // Validate platform compatibility
-                    Bitmap bitmap = new Bitmap(memoryStream);
-                    float width = 1920;
-                    float height = 1080;
+                    float width = 1280;
+                    float height = 720;
+                    using Bitmap bitmap = new Bitmap(memoryStream);
+                    if (bitmap.Height <= height && bitmap.Width <= width)
+                    {
+                        return View(mediaViewModel);
+                    }
+
                     float scale = Math.Min(width / bitmap.Width, height / bitmap.Height);
                     var scaleWidth = (int)(bitmap.Width * scale);
                     var scaleHeight = (int)(bitmap.Height * scale);
-                    Bitmap resized = new Bitmap(bitmap, scaleWidth, scaleHeight);
+                    using Bitmap resized = new Bitmap(bitmap, scaleWidth, scaleHeight);
 
                     resized.Save(resizedStream, System.Drawing.Imaging.ImageFormat.Png);
 #pragma warning restore CA1416 // Validate platform compatibility
 
-                    media.FileContents = resizedStream.ToArray();
+                    mediaViewModel.FileContents = resizedStream.ToArray();
 
-                    return View(media);
+                    return View(mediaViewModel);
                 }
             }
-            else
-            {
-                return View(media);
-            }
-         
+
+            return View(mediaViewModel);
         }
 
         // GET: Media/DownloadFile/5
@@ -113,13 +149,21 @@ namespace SteganographyWebApp.Controllers
                 return NotFound();
             }
 
+            Guid userId;
+            bool result = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
+            if (!result)
+            {
+                return View("Error");
+            }
+
             var media = _context.Media
                 .AsNoTracking()
                 .Select(m => new
                 {
-                    Id = m.Id,
-                    Name = m.Name,
-                    FileType = m.FileType,
+                    m.Id,
+                    m.UserId,
+                    m.Name,
+                    m.FileType,
                     FileContents = m.File
                 })
                 .FirstOrDefault(m => m.Id == id);
@@ -129,7 +173,12 @@ namespace SteganographyWebApp.Controllers
                 return NotFound();
             }
 
-            String contentType = media.FileType == MediaType.Image ? "image/png" : "video/x-matroska";
+            if (userId != media.UserId)
+            {
+                return Unauthorized();
+            }
+
+            string contentType = media.FileType == MediaType.Image ? "image/png" : "video/x-matroska";
 
             return File(media.FileContents, contentType, media.Name);
         }
@@ -193,7 +242,7 @@ namespace SteganographyWebApp.Controllers
                         };
 
                         _context.Add(mediaModel);
-                        await _context.SaveChangesAsync();
+                        _context.SaveChanges();
                         return RedirectToAction(nameof(Index));
                     }
                 }
@@ -210,14 +259,28 @@ namespace SteganographyWebApp.Controllers
                 return NotFound();
             }
 
+            Guid userId;
+            bool result = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
+            if (!result)
+            {
+                return View("Error");
+            }
+
             var media = await _context.Media
                 .AsNoTracking()
-                .Select(m => new MediaViewModel { Id = m.Id, Name = m.Name })
+                .Select(m => new MediaViewModel { Id = m.Id, UserId = m.UserId, Name = m.Name })
                 .FirstOrDefaultAsync(m => m.Id == id);
+
             if (media == null)
             {
                 return NotFound();
             }
+
+            if (media.UserId != userId)
+            {
+                return Unauthorized();
+            }
+
             return View(media);
         }
 
@@ -226,26 +289,38 @@ namespace SteganographyWebApp.Controllers
         // For more details, see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Edit(Guid id, [Bind("Id,Name")] MediaViewModel media)
+        public async Task<IActionResult> Edit(Guid id, [Bind("Id,Name,UserId")] MediaViewModel media)
         {
             if (id != media.Id)
             {
                 return NotFound();
             }
 
+            Guid userId;
+            bool result = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
+            if (!result)
+            {
+                return View("Error");
+            }
+
+            if (media.UserId != userId)
+            {
+                return Unauthorized();
+            }
+
             if (ModelState.IsValid && !string.IsNullOrWhiteSpace(media.Name))
             {
                 try
                 {
-                    var mediaModel = await _context.Media.FirstOrDefaultAsync(m => m.Id == id);
+                    var mediaModel = await _context.Media.Select(m => new {m.Id}).FirstOrDefaultAsync(m => m.Id == id);
                     if (mediaModel == null)
                     {
                         return NotFound();
                     }
 
-                    mediaModel.Name = media.Name;
-                    _context.Update(mediaModel);
-                    await _context.SaveChangesAsync();
+                    _context.Media
+                        .Where(m => m.Id == mediaModel.Id)
+                        .ExecuteUpdate(e => e.SetProperty(m => m.Name, media.Name));
                 }
                 catch (DbUpdateConcurrencyException)
                 {
@@ -264,58 +339,97 @@ namespace SteganographyWebApp.Controllers
         }
 
         // GET: Media/Delete/5
-        public IActionResult Delete(Guid? id)
+        public async Task<IActionResult> Delete(Guid? id)
         {
             if (id == null)
             {
                 return NotFound();
             }
 
-            var media = _context.Media
-                .AsNoTracking()
-                .Select(m => new MediaViewModel()
-                {
-                    Id = m.Id,
-                    Name = m.Name,
-                    FileType = m.FileType,
-                    FileContents = m.File,
-                    FileSize = m.FileSize,
-                    DisplayFileSize = ByteSize.FromBytes(m.FileSize).ToString()
-                })
-                .FirstOrDefault(m => m.Id == id);
+            Guid userId;
+            bool result = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
+            if (!result)
+            {
+                return View("Error");
+            }
 
-            if (media == null)
+            var mediaNoFile = await _context.Media
+                .AsNoTracking()
+                .Select(m => new
+                {
+                    m.Id,
+                    m.Name,
+                    m.UserId,
+                    m.FileType,
+                    m.FileSize,
+                })
+                .FirstOrDefaultAsync(m => m.Id == id);
+
+            if (mediaNoFile == null)
             {
                 return NotFound();
             }
 
-            if (media.FileType == MediaType.Image)
+            if (mediaNoFile.UserId != userId)
             {
-                using (var memoryStream = new MemoryStream(media.FileContents))
-                using (var resizedStream = new MemoryStream())
+                return Unauthorized();
+            }
+
+            MediaViewModel mediaViewModel = new MediaViewModel
+            {
+                Id = mediaNoFile.Id,
+                Name = mediaNoFile.Name,
+                UserId = mediaNoFile.UserId,
+                FileType = mediaNoFile.FileType,
+                DisplayFileSize = ByteSize.FromBytes(mediaNoFile.FileSize).ToString()
+            };
+
+            if (mediaViewModel.FileType == MediaType.Image)
+            {
+                var mediaFile = _context.Media
+                    .AsNoTracking()
+                    .Select(m => new MediaViewModel()
+                    {
+                        Id = m.Id,
+                        FileContents = m.File
+                    })
+                    .FirstOrDefault(m => m.Id == id);
+
+                if (mediaFile == null || mediaFile.FileContents == null)
                 {
+                    return NotFound();
+                }
+
+                mediaViewModel.FileContents = mediaFile.FileContents;
+                if (mediaNoFile.FileSize >= 2_000_000)
+                {
+                    using var memoryStream = new MemoryStream(mediaViewModel.FileContents);
+                    using var resizedStream = new MemoryStream();
 
 #pragma warning disable CA1416 // Validate platform compatibility
-                    Bitmap bitmap = new Bitmap(memoryStream);
-                    float width = 1920;
-                    float height = 1080;
+                    using Bitmap bitmap = new Bitmap(memoryStream);
+                    float width = 1280;
+                    float height = 720;
+                    if (bitmap.Height <= height && bitmap.Width <= width)
+                    {
+                        return View(mediaViewModel);
+                    }
+
                     float scale = Math.Min(width / bitmap.Width, height / bitmap.Height);
                     var scaleWidth = (int)(bitmap.Width * scale);
                     var scaleHeight = (int)(bitmap.Height * scale);
-                    Bitmap resized = new Bitmap(bitmap, scaleWidth, scaleHeight);
+                    using Bitmap resized = new Bitmap(bitmap, scaleWidth, scaleHeight);
 
                     resized.Save(resizedStream, System.Drawing.Imaging.ImageFormat.Png);
 #pragma warning restore CA1416 // Validate platform compatibility
 
-                    media.FileContents = resizedStream.ToArray();
+                    mediaViewModel.FileContents = resizedStream.ToArray();
 
-                    return View(media);
+                    return View(mediaViewModel);
                 }
             }
-            else
-            {
-                return View(media);
-            }
+
+            return View(mediaViewModel);
         }
 
         // POST: Media/Delete/5
